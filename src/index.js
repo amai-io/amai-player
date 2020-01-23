@@ -15,11 +15,8 @@ import download from 'downloadjs';
 import Draggable from 'react-draggable';
 
 import FaHeadphones from 'react-icons/lib/fa/headphones';
-import FaMinusSquareO from 'react-icons/lib/fa/minus-square-o';
 import LyricIcon from 'react-icons/lib/fa/angellist';
 import Reload from 'react-icons/lib/fa/refresh';
-import MdVolumeDown from 'react-icons/lib/md/volume-up';
-import MdVolumeMute from 'react-icons/lib/md/volume-off';
 import Download from 'react-icons/lib/fa/cloud-download';
 import LoopIcon from 'react-icons/lib/md/repeat-one';
 import RepeatIcon from 'react-icons/lib/md/repeat';
@@ -33,13 +30,12 @@ import DeleteIcon from 'react-icons/lib/fa/trash-o';
 
 import PropTypes from 'prop-types';
 
-import AudioPlayerMobile from './components/PlayerMobile';
+import AudioController from './components/AudioController';
 import AudioListsPanel from './components/AudioListsPanel';
 import AnimatePauseIcon from './components/AnimatePauseIcon';
 import AnimatePlayIcon from './components/AnimatePlayIcon';
-import CircleProcessBar from './components/CircleProcessBar';
+import AudioPlayerMobile from './components/PlayerMobile';
 import Load from './components/Load';
-import PlayModel from './components/PlayModel';
 
 import formatTime from './utils/formatTime';
 import createRandomNum from './utils/createRandomNum';
@@ -51,6 +47,7 @@ import Lyric from './lyric';
 
 import 'rc-slider/assets/index.css';
 import 'rc-switch/assets/index.css';
+import PlayerPanel from './components/PlayerPanel';
 
 const IS_MOBILE = isMobile();
 
@@ -153,6 +150,101 @@ class ReactAmaiMusicPlayer extends PureComponent {
     this._PLAY_MODE_LENGTH_ = this._PLAY_MODE_.length;
   }
 
+  // eslint-disable-next-line camelcase
+  UNSAFE_componentWillMount() {
+    const {
+      mode,
+      audioLists,
+      defaultPlayMode,
+      remember,
+      theme,
+      defaultPlayIndex,
+      autoPlay,
+    } = this.props;
+
+    // Toggle 'mini' or 'full' mode
+    this.toggleMode(mode);
+
+    if (audioLists.length >= 1) {
+      const info = {
+        ...this.getPlayInfo(audioLists),
+        isInitAutoplay: autoPlay,
+      };
+      const lastPlayStatus = remember
+        ? this.getLastPlayStatus(defaultPlayIndex)
+        : { playMode: defaultPlayMode, theme };
+
+      if (typeof info.musicSrc === 'function') {
+        info
+          .musicSrc()
+          .then(val => {
+            this.setState({
+              ...info,
+              musicSrc: val,
+              ...lastPlayStatus,
+            });
+            return null;
+          })
+          .catch(this.onAudioLoadError);
+      } else {
+        this.setState({
+          ...info,
+          ...lastPlayStatus,
+        });
+      }
+    }
+  }
+
+  componentDidMount() {
+    this.addMobileListener();
+    this.setDefaultAudioVolume();
+    this.bindUnhandledRejection();
+    if (this.props.audioLists.length >= 1) {
+      this.bindEvents(this.audio);
+      this.onGetAudioInstance();
+      this.initLyricParser();
+      if (IS_MOBILE) {
+        this.bindMobileAutoPlayEvents();
+      }
+      if (!IS_MOBILE && isSafari()) {
+        this.bindSafariAutoPlayEvents();
+      }
+    }
+  }
+
+  // When the parent component updates props, such as audioLists change, update playback information
+  // eslint-disable-next-line camelcase
+  UNSAFE_componentWillReceiveProps({ audioLists, playIndex, theme, mode, clearPriorAudioLists }) {
+    if (!arrayEqual(audioLists)(this.props.audioLists)) {
+      if (clearPriorAudioLists) {
+        this.changeAudioLists(audioLists);
+      } else {
+        this.updateAudioLists(audioLists);
+      }
+    } else {
+      this.updatePlayIndex(playIndex);
+    }
+    this.updateTheme(theme);
+    this.updateMode(mode);
+  }
+
+  // eslint-disable-next-line camelcase
+  UNSAFE_componentWillUpdate(nextProps, nextState) {
+    if (
+      nextProps.clearPriorAudioLists &&
+      nextState.isAudioListsChange !== this.state.isAudioListsChange
+    ) {
+      this.resetPlayList(nextState);
+    }
+  }
+
+  componentWillUnmount() {
+    this.unBindEvents(this.audio, undefined, false);
+    this.unBindUnhandledRejection();
+    this.media.removeListener(this.listenerIsMobile);
+    this.media = undefined;
+  }
+
   // Music information returned to the user
   getBaseAudioInfo() {
     const { playId, cover, name, musicSrc, soundValue, lyric, audioLists } = this.state;
@@ -191,6 +283,14 @@ class ReactAmaiMusicPlayer extends PureComponent {
     };
   }
 
+  bindUnhandledRejection = () => {
+    window.addEventListener('unhandledrejection', this.onAudioLoadError); // eslint-disable-line no-undef
+  };
+
+  unBindUnhandledRejection = () => {
+    window.removeEventListener('unhandledrejection', this.onAudioLoadError); // eslint-disable-line no-undef
+  };
+
   // Render Play Mode Corresponding Button
   renderPlayModeIcon = playMode => {
     let IconNode = '';
@@ -214,489 +314,9 @@ class ReactAmaiMusicPlayer extends PureComponent {
     return IconNode;
   };
 
-  render() {
-    const {
-      className,
-      controllerTitle,
-      closeText,
-      openText,
-      notContentText,
-      drag,
-      style,
-      showDownload,
-      showPlay,
-      showReload,
-      showPlayMode,
-      showThemeSwitch,
-      panelTitle,
-      checkedText,
-      unCheckedText,
-      toggleMode,
-      showMiniModeCover,
-      extendsContent,
-      defaultPlayMode,
-      seeked,
-      showProgressLoadBar,
-      bounds,
-      defaultPosition,
-      showMiniProcessBar,
-      preload,
-      glassBg,
-      remove,
-      lyricClassName,
-      showLyric,
-      emptyLyricPlaceholder,
-      getContainer,
-      autoHiddenCover,
-    } = this.props;
-
-    const {
-      toggle,
-      playing,
-      duration,
-      currentTime,
-      isMute,
-      soundValue,
-      moveX,
-      moveY,
-      loading,
-      audioListsPanelVisible,
-      pause,
-      theme,
-      name,
-      cover,
-      singer,
-      musicSrc,
-      playId,
-      isMobile, // eslint-disable-line no-shadow
-      playMode,
-      playModeTipVisible,
-      playModelNameVisible,
-      initAnimate,
-      loadProgress,
-      audioLists,
-      removeId,
-      currentLyric,
-      audioLyricVisible,
-    } = this.state;
-
-    const preloadState =
-      !(preload === false || preload === 'none') &&
-      (preload === true ? { preload: 'auto' } : { preload });
-
-    const panelToggleAnimate = initAnimate
-      ? { show: audioListsPanelVisible, hide: !audioListsPanelVisible }
-      : { show: audioListsPanelVisible };
-
-    const _playMode_ = this.PLAY_MODE[playMode || defaultPlayMode];
-
-    const currentPlayMode = _playMode_.key;
-    const currentPlayModeName = _playMode_.value;
-
-    const isShowMiniModeCover =
-      (showMiniModeCover && !autoHiddenCover) ||
-      (autoHiddenCover && cover && { style: { backgroundImage: `url(${cover})` } });
-
-    const _currentTime = formatTime(currentTime);
-    const _duration = formatTime(duration);
-
-    const progressHandler = seeked && {
-      onChange: this.onHandleProgress,
-      onAfterChange: this.onAudioSeeked,
-    };
-
-    // progress bar
-    const ProgressBar = (
-      <Slider
-        max={Math.ceil(duration)}
-        defaultValue={0}
-        value={Math.ceil(currentTime)}
-        {...progressHandler}
-        {...sliderBaseOptions}
-      />
-    );
-
-    // Download button
-    const DownloadComponent = showDownload && (
-      <span
-        className="group audio-download"
-        {...{ [IS_MOBILE ? 'onTouchStart' : 'onClick']: this.onAudioDownload }}
-      >
-        <Download />
-      </span>
-    );
-
-    // Theme switch
-    const ThemeSwitchComponent = showThemeSwitch && (
-      <span className="group theme-switch">
-        <Switch
-          className="theme-switch-container"
-          onChange={this.themeChange}
-          checkedChildren={checkedText}
-          unCheckedChildren={unCheckedText}
-          checked={theme === this.lightThemeName}
-        />
-      </span>
-    );
-
-    // Replay
-    const ReloadComponent = showReload && (
-      <span
-        className="group reload-btn"
-        {...(IS_MOBILE ? { onTouchStart: this.onAudioReload } : { onClick: this.onAudioReload })}
-        key="reload-btn"
-        title="Reload"
-      >
-        <Reload />
-      </span>
-    );
-
-    // lyrics
-    const LyricComponent = showLyric && (
-      <span
-        className={classNames('group lyric-btn', {
-          'lyric-btn-active': audioLyricVisible,
-        })}
-        {...(IS_MOBILE
-          ? { onTouchStart: this.toggleAudioLyric }
-          : { onClick: this.toggleAudioLyric })}
-        key="lyric-btn"
-        title="toggle lyric"
-      >
-        <LyricIcon />
-      </span>
-    );
-
-    // Play mode
-    const PlayModeComponent = showPlayMode && (
-      <span
-        className={classNames('group loop-btn')}
-        {...(IS_MOBILE ? { onTouchStart: this.togglePlayMode } : { onClick: this.togglePlayMode })}
-        key="play-mode-btn"
-        title={this.PLAY_MODE[currentPlayMode].value}
-      >
-        {this.renderPlayModeIcon(currentPlayMode)}
-      </span>
-    );
-
-    const miniProcessBarR = isMobile ? 30 : 40;
-
-    const AudioController = (
-      <div className={classNames('react-amai-music-player')} style={defaultPosition}>
-        <div className={classNames('music-player')} key="music-player">
-          {showMiniProcessBar && (
-            <CircleProcessBar progress={currentTime / duration} r={miniProcessBarR} />
-          )}
-          <div
-            key="controller"
-            id={this.targetId}
-            className={classNames('scale', 'music-player-controller', {
-              'music-player-playing': this.state.playing,
-            })}
-            {...isShowMiniModeCover}
-          >
-            {loading ? (
-              <Load />
-            ) : (
-              <>
-                <span className="controller-title" key="controller-title">
-                  {controllerTitle}
-                </span>
-                <div key="setting" className="music-player-controller-setting">
-                  {toggle ? closeText : openText}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-
-    const container = getContainer() || document.body;
-
-    return createPortal(
-      <div
-        className={classNames(
-          'react-amai-music-player-main',
-          {
-            'light-theme': theme === this.lightThemeName,
-            'dark-theme': theme === this.darkThemeName,
-          },
-          className
-        )}
-        style={style}
-      >
-        {toggle && isMobile && (
-          <AudioPlayerMobile
-            playing={playing}
-            loading={loading}
-            pause={pause}
-            name={name}
-            singer={singer}
-            cover={cover}
-            themeSwitch={ThemeSwitchComponent}
-            duration={_duration}
-            currentTime={_currentTime}
-            progressBar={ProgressBar}
-            onPlay={this.onPlay}
-            currentPlayModeName={this.PLAY_MODE[currentPlayMode].value}
-            playMode={PlayModeComponent}
-            audioNextPlay={this.audioNextPlay}
-            audioPrevPlay={this.audioPrevPlay}
-            playListsIcon={<PlayLists />}
-            reloadIcon={ReloadComponent}
-            downloadIcon={DownloadComponent}
-            nextAudioIcon={<NextAudioIcon />}
-            prevAudioIcon={<PrevAudioIcon />}
-            playIcon={<AnimatePlayIcon />}
-            pauseIcon={<AnimatePauseIcon />}
-            closeIcon={<CloseBtn />}
-            loadingIcon={<Load />}
-            playModeTipVisible={playModeTipVisible}
-            openAudioListsPanel={this.openAudioListsPanel}
-            onClose={this.onHidePanel}
-            extendsContent={extendsContent}
-            glassBg={glassBg}
-            LyricIcon={LyricComponent}
-            autoHiddenCover={autoHiddenCover}
-          />
-        )}
-
-        {toggle ? (
-          undefined
-        ) : drag ? (
-          <Draggable
-            bounds={bounds}
-            position={{ x: moveX, y: moveY }}
-            onDrag={this.controllerMouseMove}
-            onStop={this.controllerMouseUp}
-            onStart={this.controllerMouseMove}
-          >
-            {AudioController}
-          </Draggable>
-        ) : (
-          <>{AudioController}</>
-        )}
-        {toggle ? (
-          isMobile ? (
-            undefined
-          ) : (
-            <div
-              key="panel"
-              className={classNames('music-player-panel', 'translate', {
-                'glass-bg': glassBg,
-              })}
-            >
-              <section className="panel-content" key="panel-content">
-                {(!autoHiddenCover || (autoHiddenCover && cover)) && (
-                  <div
-                    className={classNames('img-content', 'img-rotate', {
-                      'img-rotate-pause': pause || !playing || !cover,
-                    })}
-                    style={{ backgroundImage: `url(${cover})` }}
-                    key="img-content"
-                  />
-                )}
-                <div className="progress-bar-content" key="progress-bar-content">
-                  <span className="audio-title">
-                    {name} {singer ? `- ${singer}` : ''}
-                  </span>
-                  <section className="audio-main">
-                    <span key="current-time" className="current-time">
-                      {loading ? '--' : _currentTime}
-                    </span>
-                    <div className="progress-bar" key="progress-bar">
-                      {showProgressLoadBar ? (
-                        <div
-                          className="progress-load-bar"
-                          key="progress-load-bar"
-                          style={{ width: `${Math.min(loadProgress, 100)}%` }}
-                        />
-                      ) : (
-                        undefined
-                      )}
-
-                      {ProgressBar}
-                    </div>
-                    <span key="duration" className="duration">
-                      {loading ? '--' : _duration}
-                    </span>
-                  </section>
-                </div>
-                <div className="player-content" key="player-content">
-                  {/* Play button */}
-                  {loading ? (
-                    <Load />
-                  ) : showPlay ? (
-                    <span className="group">
-                      <span
-                        className="group prev-audio"
-                        title="Previous track"
-                        {...(IS_MOBILE
-                          ? { onTouchStart: this.audioPrevPlay }
-                          : { onClick: this.audioPrevPlay })}
-                      >
-                        <PrevAudioIcon />
-                      </span>
-                      <span
-                        className="group play-btn"
-                        key="play-btn"
-                        ref={node => (this.playBtn = node)}
-                        {...(IS_MOBILE ? { onTouchStart: this.onPlay } : { onClick: this.onPlay })}
-                        title={playing ? 'Click to pause' : 'Click to play'}
-                      >
-                        {playing ? (
-                          <span>
-                            <AnimatePauseIcon />
-                          </span>
-                        ) : (
-                          <span>
-                            <AnimatePlayIcon />
-                          </span>
-                        )}
-                      </span>
-                      <span
-                        className="group next-audio"
-                        title="Next track"
-                        {...(IS_MOBILE
-                          ? { onTouchStart: this.audioNextPlay }
-                          : { onClick: this.audioNextPlay })}
-                      >
-                        <NextAudioIcon />
-                      </span>
-                    </span>
-                  ) : (
-                    undefined
-                  )}
-
-                  {/* Replay */}
-                  {ReloadComponent}
-                  {/* Download songs */}
-                  {DownloadComponent}
-                  {/* Theme selection */}
-                  {ThemeSwitchComponent}
-
-                  {/* Custom extension buttons */}
-                  {extendsContent || null}
-
-                  {/* Volume control */}
-                  <span className="group play-sounds" key="play-sound" title="Volume">
-                    {isMute ? (
-                      <span
-                        className="sounds-icon"
-                        {...(IS_MOBILE
-                          ? { onTouchStart: this.onSound }
-                          : { onClick: this.onSound })}
-                      >
-                        <MdVolumeMute />
-                      </span>
-                    ) : (
-                      <span
-                        className="sounds-icon"
-                        {...(IS_MOBILE ? { onTouchStart: this.onMute } : { onClick: this.onMute })}
-                      >
-                        <MdVolumeDown />
-                      </span>
-                    )}
-                    <Slider
-                      max={1}
-                      value={soundValue}
-                      onChange={this.audioSoundChange}
-                      className="sound-operation"
-                      {...sliderBaseOptions}
-                    />
-                  </span>
-
-                  {/* Play mode */}
-                  {PlayModeComponent}
-
-                  {/* Lyrics button */}
-                  {LyricComponent}
-
-                  {/* Playlist button */}
-                  <span
-                    className="group audio-lists-btn"
-                    key="audio-lists-btn"
-                    title="play lists"
-                    {...(IS_MOBILE
-                      ? { onTouchStart: this.openAudioListsPanel }
-                      : { onClick: this.openAudioListsPanel })}
-                  >
-                    <span className="audio-lists-icon">
-                      <PlayLists />
-                    </span>
-                    <span className="audio-lists-num">{audioLists.length}</span>
-                  </span>
-
-                  {/* Collapse panel */}
-                  {toggleMode ? (
-                    <span
-                      className="group hide-panel"
-                      key="hide-panel-btn"
-                      {...(IS_MOBILE
-                        ? { onTouchStart: this.onHidePanel }
-                        : { onClick: this.onHidePanel })}
-                    >
-                      <FaMinusSquareO />
-                    </span>
-                  ) : (
-                    undefined
-                  )}
-                </div>
-              </section>
-              {/* Play mode prompt box */}
-              <PlayModel visible={playModelNameVisible} value={currentPlayModeName} />
-            </div>
-          )
-        ) : (
-          undefined
-        )}
-        {/* Playlist panel */}
-        <AudioListsPanel
-          playId={playId}
-          pause={pause}
-          loading={loading ? <Load /> : undefined}
-          visible={audioListsPanelVisible}
-          audioLists={audioLists}
-          notContentText={notContentText}
-          onPlay={this.audioListsPlay}
-          onCancel={this.closeAudioListsPanel}
-          playIcon={<AnimatePlayIcon />}
-          pauseIcon={<AnimatePauseIcon />}
-          closeIcon={<CloseBtn />}
-          panelTitle={panelTitle}
-          isMobile={isMobile}
-          panelToggleAnimate={panelToggleAnimate}
-          glassBg={glassBg}
-          cover={cover}
-          remove={remove}
-          deleteIcon={<DeleteIcon />}
-          onDelete={this.deleteAudioLists}
-          removeId={removeId}
-          audioListsDragEnd={this.audioListsDragEnd}
-        />
-        {/* lyrics */}
-        {audioLyricVisible && (
-          <Draggable>
-            <div className={classNames('music-player-lyric', lyricClassName)}>
-              {currentLyric || emptyLyricPlaceholder}
-            </div>
-          </Draggable>
-        )}
-        <audio
-          className="music-player-audio"
-          {...preloadState}
-          src={musicSrc}
-          ref={node => (this.audio = node)}
-        />
-      </div>,
-      container
-    );
-  }
-
   toggleAudioLyric = () => {
-    this.setState({
-      audioLyricVisible: !this.state.audioLyricVisible,
+    this.setState(prevState => {
+      return { audioLyricVisible: prevState.audioLyricVisible };
     });
   };
 
@@ -744,6 +364,7 @@ class ReactAmaiMusicPlayer extends PureComponent {
       audio => audio.id === playId
     );
 
+    // eslint-disable-next-line no-shadow
     const loadAudio = musicSrc => {
       this.setState(
         {
@@ -769,15 +390,18 @@ class ReactAmaiMusicPlayer extends PureComponent {
         this.props.onAudioPlayTrackChange(playId, audioLists, this.getBaseAudioInfo());
     };
 
-    switch (typeof musicSrc) {
-      case 'function':
-        musicSrc().then(originMusicSrc => {
+    if (typeof musicSrc === 'function') {
+      musicSrc()
+        .then(originMusicSrc => {
           loadAudio(originMusicSrc);
-        }, this.onAudioLoadError);
-        break;
-      default:
-        loadAudio(musicSrc);
+          return null;
+        })
+        .catch(this.onAudioLoadError);
+    } else {
+      loadAudio(musicSrc);
     }
+
+    return true;
   };
 
   resetAudioStatus = () => {
@@ -798,13 +422,14 @@ class ReactAmaiMusicPlayer extends PureComponent {
     // If you don't pass id, delete all
     const { audioLists, playId } = this.state;
     if (audioLists.length < 1) {
-      return;
+      return true;
     }
     this.lyric && this.lyric.stop();
     if (!audioId) {
       this.props.onAudioListsChange && this.props.onAudioListsChange('', [], {});
       return this.resetAudioStatus();
     }
+    // eslint-disable-next-line consistent-return
     const newAudioLists = [...audioLists].filter(audio => audio.id !== audioId);
     // Trigger delete animation, wait for animation to end
     this.setState({ removeId: audioId });
@@ -822,16 +447,18 @@ class ReactAmaiMusicPlayer extends PureComponent {
           if (audioId === playId) {
             this.handlePlay(this.PLAY_MODE.orderLoop.key);
           }
+          return true;
         }
       );
     }, this.audioListRemoveAnimateTime);
 
     this.props.onAudioListsChange &&
       this.props.onAudioListsChange(playId, newAudioLists, this.getBaseAudioInfo());
+    return true;
   };
 
   openAudioListsPanel = () => {
-    this.setState(({ audioListsPanelVisible, initAnimate }) => ({
+    this.setState(({ audioListsPanelVisible }) => ({
       initAnimate: true,
       audioListsPanelVisible: !audioListsPanelVisible,
     }));
@@ -858,12 +485,16 @@ class ReactAmaiMusicPlayer extends PureComponent {
       const baseAudioInfo = this.getBaseAudioInfo();
       const onBeforeAudioDownload = this.props.onBeforeAudioDownload(baseAudioInfo);
       let transformedDownloadAudioInfo = {};
+      // eslint-disable-next-line promise/catch-or-return
       if (onBeforeAudioDownload && onBeforeAudioDownload.then) {
-        onBeforeAudioDownload.then(info => {
-          const { src, filename, mimeType } = info;
-          transformedDownloadAudioInfo = info;
-          download(src, filename, mimeType);
-        });
+        onBeforeAudioDownload
+          .then(info => {
+            const { src, filename, mimeType } = info;
+            transformedDownloadAudioInfo = info;
+            download(src, filename, mimeType);
+            return null;
+          })
+          .catch();
       } else {
         download(this.state.musicSrc);
       }
@@ -949,7 +580,7 @@ class ReactAmaiMusicPlayer extends PureComponent {
   };
 
   // Collapse player
-  onHidePanel = e => {
+  onHidePanel = () => {
     this.setState({ toggle: false, audioListsPanelVisible: false });
     this.props.onModeChange && this.props.onModeChange(this.toggleModeName.mini);
   };
@@ -1113,6 +744,7 @@ class ReactAmaiMusicPlayer extends PureComponent {
       default:
         IconNode = <OrderPlayIcon />;
     }
+    return true;
   };
 
   // Audio playback ends
@@ -1129,13 +761,10 @@ class ReactAmaiMusicPlayer extends PureComponent {
   audioPrevAndNextBasePlayHandle = (isNext = true) => {
     const { playMode } = this.state;
     let _playMode = '';
-    switch (playMode) {
-      case this.PLAY_MODE.shufflePlay.key:
-        _playMode = playMode;
-        break;
-      default:
-        _playMode = this.PLAY_MODE.orderLoop.key;
-        break;
+    if (playMode === this.PLAY_MODE.shufflePlay.key) {
+      _playMode = playMode;
+    } else {
+      _playMode = this.PLAY_MODE.orderLoop.key;
     }
     this.handlePlay(_playMode, isNext);
   };
@@ -1351,14 +980,13 @@ class ReactAmaiMusicPlayer extends PureComponent {
     bind = true
   ) => {
     const { once } = this.props;
-    for (const name in eventsNames) {
+    Object.keys(eventsNames).forEach(name => {
       const _events = eventsNames[name];
+      // eslint-disable-next-line no-unused-expressions
       bind
-        ? target.addEventListener(name, _events, {
-            once: !!(once && name === 'play'),
-          })
+        ? target.addEventListener(name, _events, { once: !!(once && name === 'play') })
         : target.removeEventListener(name, _events);
-    }
+    });
   };
 
   getPlayInfo = (audioLists = []) => {
@@ -1391,6 +1019,7 @@ class ReactAmaiMusicPlayer extends PureComponent {
   // I change the name of getPlayInfo to getPlayInfoOfNewList because i didn't want to change the prior changes
   // the only thing this function does is to add id to audiolist elements.
   getPlayInfoOfNewList = (audioLists = []) => {
+    // eslint-disable-next-line sonarjs/no-identical-functions
     const _audioLists = audioLists.map(info => {
       return {
         ...info,
@@ -1418,14 +1047,16 @@ class ReactAmaiMusicPlayer extends PureComponent {
   initPlayInfo = (audioLists, cb) => {
     const info = this.getPlayInfo(audioLists);
 
-    switch (typeof info.musicSrc) {
-      case 'function':
-        info.musicSrc().then(originMusicSrc => {
+    if (typeof info.musicSrc === 'function') {
+      info
+        .musicSrc()
+        .then(originMusicSrc => {
           this.setState({ ...info, musicSrc: originMusicSrc }, cb);
-        }, this.onAudioLoadError);
-        break;
-      default:
-        this.setState(info, cb);
+          return null;
+        })
+        .catch(this.onAudioLoadError);
+    } else {
+      this.setState(info, cb);
     }
   };
 
@@ -1520,23 +1151,25 @@ class ReactAmaiMusicPlayer extends PureComponent {
         ? this.getLastPlayStatus(defaultPlayIndex)
         : { playMode: defaultPlayMode, theme };
 
-      switch (typeof info.musicSrc) {
-        case 'function':
-          info.musicSrc().then(val => {
+      if (typeof info.musicSrc === 'function') {
+        info
+          .musicSrc()
+          .then(val => {
             this.setState({
               ...info,
               musicSrc: val,
               isInitAutoplay: autoPlayInitLoadPlayList,
               ...lastPlayStatus,
             });
-          }, this.onAudioLoadError);
-          break;
-        default:
-          this.setState({
-            ...info,
-            isInitAutoplay: autoPlayInitLoadPlayList,
-            ...lastPlayStatus,
-          });
+            return null;
+          })
+          .catch(this.onAudioLoadError);
+      } else {
+        this.setState({
+          ...info,
+          isInitAutoplay: autoPlayInitLoadPlayList,
+          ...lastPlayStatus,
+        });
       }
     }
   };
@@ -1576,109 +1209,346 @@ class ReactAmaiMusicPlayer extends PureComponent {
     this.props.getAudioInstance && this.props.getAudioInstance(this.audio);
   };
 
-  // When the parent component updates props, such as audioLists change, update playback information
-  // eslint-disable-next-line camelcase
-  UNSAFE_componentWillReceiveProps({ audioLists, playIndex, theme, mode, clearPriorAudioLists }) {
-    if (!arrayEqual(audioLists)(this.props.audioLists)) {
-      if (clearPriorAudioLists) {
-        this.changeAudioLists(audioLists);
-      } else {
-        this.updateAudioLists(audioLists);
-      }
-    } else {
-      this.updatePlayIndex(playIndex);
-    }
-    this.updateTheme(theme);
-    this.updateMode(mode);
-  }
-
-  // eslint-disable-next-line camelcase
-  UNSAFE_componentWillUpdate(nextProps, nextState) {
-    if (nextProps.clearPriorAudioLists) {
-      if (nextState.isAudioListsChange !== this.state.isAudioListsChange) {
-        this.resetPlayList(nextState);
-      }
-    }
-  }
-
-  // eslint-disable-next-line camelcase
-  UNSAFE_componentWillMount() {
+  render() {
     const {
-      mode,
-      audioLists,
+      className,
+      controllerTitle,
+      closeText,
+      openText,
+      notContentText,
+      drag,
+      style,
+      showDownload,
+      showPlay,
+      showReload,
+      showPlayMode,
+      showThemeSwitch,
+      panelTitle,
+      checkedText,
+      unCheckedText,
+      toggleMode,
+      showMiniModeCover,
+      extendsContent,
       defaultPlayMode,
-      remember,
-      theme,
-      defaultPlayIndex,
-      autoPlay,
+      seeked,
+      showProgressLoadBar,
+      bounds,
+      defaultPosition,
+      showMiniProcessBar,
+      preload,
+      glassBg,
+      remove,
+      lyricClassName,
+      showLyric,
+      emptyLyricPlaceholder,
+      getContainer,
+      autoHiddenCover,
     } = this.props;
 
-    // Toggle 'mini' or 'full' mode
-    this.toggleMode(mode);
+    const {
+      toggle,
+      playing,
+      duration,
+      currentTime,
+      isMute,
+      soundValue,
+      moveX,
+      moveY,
+      loading,
+      audioListsPanelVisible,
+      pause,
+      theme,
+      name,
+      cover,
+      singer,
+      musicSrc,
+      playId,
+      isMobile, // eslint-disable-line no-shadow
+      playMode,
+      playModeTipVisible,
+      playModelNameVisible,
+      initAnimate,
+      loadProgress,
+      audioLists,
+      removeId,
+      currentLyric,
+      audioLyricVisible,
+    } = this.state;
 
-    if (audioLists.length >= 1) {
-      const info = {
-        ...this.getPlayInfo(audioLists),
-        isInitAutoplay: autoPlay,
-      };
-      const lastPlayStatus = remember
-        ? this.getLastPlayStatus(defaultPlayIndex)
-        : { playMode: defaultPlayMode, theme };
+    const preloadState =
+      !(preload === false || preload === 'none') &&
+      (preload === true ? { preload: 'auto' } : { preload });
 
-      switch (typeof info.musicSrc) {
-        case 'function':
-          info.musicSrc().then(val => {
-            this.setState({
-              ...info,
-              musicSrc: val,
-              ...lastPlayStatus,
-            });
-          }, this.onAudioLoadError);
-          break;
-        default:
-          this.setState({
-            ...info,
-            ...lastPlayStatus,
-          });
-      }
-    }
-  }
+    const panelToggleAnimate = initAnimate
+      ? { show: audioListsPanelVisible, hide: !audioListsPanelVisible }
+      : { show: audioListsPanelVisible };
 
-  bindUnhandledRejection = () => {
-    window.addEventListener('unhandledrejection', this.onAudioLoadError); // eslint-disable-line no-undef
-  };
+    const _playMode_ = this.PLAY_MODE[playMode || defaultPlayMode];
 
-  unBindUnhandledRejection = () => {
-    window.removeEventListener('unhandledrejection', this.onAudioLoadError); // eslint-disable-line no-undef
-  };
+    const currentPlayMode = _playMode_.key;
+    const currentPlayModeName = _playMode_.value;
 
-  componentWillUnmount() {
-    this.unBindEvents(this.audio, undefined, false);
-    this.unBindUnhandledRejection();
-    this.media.removeListener(this.listenerIsMobile);
-    this.media = undefined;
-  }
+    const isShowMiniModeCover =
+      (showMiniModeCover && !autoHiddenCover) ||
+      (autoHiddenCover && cover && { style: { backgroundImage: `url(${cover})` } });
 
-  componentDidMount() {
-    this.addMobileListener();
-    this.setDefaultAudioVolume();
-    this.bindUnhandledRejection();
-    if (this.props.audioLists.length >= 1) {
-      this.bindEvents(this.audio);
-      this.onGetAudioInstance();
-      this.initLyricParser();
-      if (IS_MOBILE) {
-        this.bindMobileAutoPlayEvents();
-      }
-      if (!IS_MOBILE && isSafari()) {
-        this.bindSafariAutoPlayEvents();
-      }
-    }
+    const _currentTime = formatTime(currentTime);
+    const _duration = formatTime(duration);
+
+    const progressHandler = seeked && {
+      onChange: this.onHandleProgress,
+      onAfterChange: this.onAudioSeeked,
+    };
+
+    // progress bar
+    const ProgressBar = (
+      <Slider
+        max={Math.ceil(duration)}
+        defaultValue={0}
+        value={Math.ceil(currentTime)}
+        {...progressHandler}
+        {...sliderBaseOptions}
+      />
+    );
+
+    // Download button
+    const DownloadComponent = showDownload && (
+      <span
+        className="group audio-download"
+        {...{ [IS_MOBILE ? 'onTouchStart' : 'onClick']: this.onAudioDownload }}
+      >
+        <Download />
+      </span>
+    );
+
+    // Theme switch
+    const ThemeSwitchComponent = showThemeSwitch && (
+      <span className="group theme-switch">
+        <Switch
+          className="theme-switch-container"
+          onChange={this.themeChange}
+          checkedChildren={checkedText}
+          unCheckedChildren={unCheckedText}
+          checked={theme === this.lightThemeName}
+        />
+      </span>
+    );
+
+    // Replay
+    const ReloadComponent = showReload && (
+      <span
+        className="group reload-btn"
+        {...(IS_MOBILE ? { onTouchStart: this.onAudioReload } : { onClick: this.onAudioReload })}
+        key="reload-btn"
+        title="Reload"
+      >
+        <Reload />
+      </span>
+    );
+
+    // lyrics
+    const LyricComponent = showLyric && (
+      <span
+        className={classNames('group lyric-btn', {
+          'lyric-btn-active': audioLyricVisible,
+        })}
+        {...(IS_MOBILE
+          ? { onTouchStart: this.toggleAudioLyric }
+          : { onClick: this.toggleAudioLyric })}
+        key="lyric-btn"
+        title="toggle lyric"
+      >
+        <LyricIcon />
+      </span>
+    );
+
+    const LyricComponentDraggable = audioLyricVisible && (
+      <Draggable>
+        <div className={classNames('music-player-lyric', lyricClassName)}>
+          {currentLyric || emptyLyricPlaceholder}
+        </div>
+      </Draggable>
+    );
+
+    // Play mode
+    const PlayModeComponent = showPlayMode && (
+      <span
+        className={classNames('group loop-btn')}
+        {...(IS_MOBILE ? { onTouchStart: this.togglePlayMode } : { onClick: this.togglePlayMode })}
+        key="play-mode-btn"
+        title={this.PLAY_MODE[currentPlayMode].value}
+      >
+        {this.renderPlayModeIcon(currentPlayMode)}
+      </span>
+    );
+
+    const miniProcessBarR = isMobile ? 30 : 40;
+
+    const container = getContainer() || document.body;
+
+    return createPortal(
+      <div
+        className={classNames(
+          'react-amai-music-player-main',
+          {
+            'light-theme': theme === this.lightThemeName,
+            'dark-theme': theme === this.darkThemeName,
+          },
+          className
+        )}
+        style={style}
+      >
+        {toggle && isMobile && (
+          <AudioPlayerMobile
+            playing={playing}
+            loading={loading}
+            pause={pause}
+            name={name}
+            singer={singer}
+            cover={cover}
+            themeSwitch={ThemeSwitchComponent}
+            duration={_duration}
+            currentTime={_currentTime}
+            progressBar={ProgressBar}
+            onPlay={this.onPlay}
+            currentPlayModeName={this.PLAY_MODE[currentPlayMode].value}
+            playMode={PlayModeComponent}
+            audioNextPlay={this.audioNextPlay}
+            audioPrevPlay={this.audioPrevPlay}
+            playListsIcon={<PlayLists />}
+            reloadIcon={ReloadComponent}
+            downloadIcon={DownloadComponent}
+            nextAudioIcon={<NextAudioIcon />}
+            prevAudioIcon={<PrevAudioIcon />}
+            playIcon={<AnimatePlayIcon />}
+            pauseIcon={<AnimatePauseIcon />}
+            closeIcon={<CloseBtn />}
+            loadingIcon={<Load />}
+            playModeTipVisible={playModeTipVisible}
+            openAudioListsPanel={this.openAudioListsPanel}
+            onClose={this.onHidePanel}
+            extendsContent={extendsContent}
+            glassBg={glassBg}
+            LyricIcon={LyricComponent}
+            autoHiddenCover={autoHiddenCover}
+          />
+        )}
+
+        {!toggle && drag ? (
+          <Draggable
+            bounds={bounds}
+            position={{ x: moveX, y: moveY }}
+            onDrag={this.controllerMouseMove}
+            onStop={this.controllerMouseUp}
+            onStart={this.controllerMouseMove}
+          >
+            <AudioController
+              defaultPosition={defaultPosition}
+              showMiniProcessBar={showMiniProcessBar}
+              currentTime={currentTime}
+              duration={duration}
+              miniProcessBarR={miniProcessBarR}
+              isShowMiniModeCover={isShowMiniModeCover}
+              loading={loading}
+              controllerTitle={controllerTitle}
+              toggle={toggle}
+              closeText={closeText}
+              openText={openText}
+            />
+          </Draggable>
+        ) : (
+          <AudioController
+            defaultPosition={defaultPosition}
+            showMiniProcessBar={showMiniProcessBar}
+            currentTime={currentTime}
+            duration={duration}
+            miniProcessBarR={miniProcessBarR}
+            isShowMiniModeCover={isShowMiniModeCover}
+            loading={loading}
+            controllerTitle={controllerTitle}
+            toggle={toggle}
+            closeText={closeText}
+            openText={openText}
+          />
+        )}
+
+        {toggle && !isMobile && (
+          <PlayerPanel
+            audioLists={audioLists}
+            playing={playing}
+            loading={loading}
+            pause={pause}
+            name={name}
+            singer={singer}
+            cover={cover}
+            currentPlayModeName={this.PLAY_MODE[currentPlayMode].value}
+            onClose={this.onHidePanel}
+            extendsContent={extendsContent}
+            glassBg={glassBg}
+            autoHiddenCover={autoHiddenCover}
+            playModelNameVisible={playModelNameVisible}
+            toggleMode={toggleMode}
+            LyricIcon={LyricComponent}
+            playMode={PlayModeComponent}
+            soundValue={soundValue}
+            isMute={isMute}
+            reloadIcon={ReloadComponent}
+            downloadIcon={DownloadComponent}
+            themeSwitch={ThemeSwitchComponent}
+            showPlay={showPlay}
+            showProgressLoadBar={showProgressLoadBar}
+            loadProgress={loadProgress}
+            nextAudioIcon={<NextAudioIcon />}
+            prevAudioIcon={<PrevAudioIcon />}
+            playListsIcon={<PlayLists />}
+            closeIcon={<CloseBtn />}
+          />
+        )}
+
+        {/* Playlist panel */}
+        <AudioListsPanel
+          playId={playId}
+          pause={pause}
+          loading={loading ? <Load /> : undefined}
+          visible={audioListsPanelVisible}
+          audioLists={audioLists}
+          notContentText={notContentText}
+          onPlay={this.audioListsPlay}
+          onCancel={this.closeAudioListsPanel}
+          onMute={this.onMute}
+          playIcon={<AnimatePlayIcon />}
+          pauseIcon={<AnimatePauseIcon />}
+          closeIcon={<CloseBtn />}
+          panelTitle={panelTitle}
+          isMobile={isMobile}
+          panelToggleAnimate={panelToggleAnimate}
+          glassBg={glassBg}
+          cover={cover}
+          remove={remove}
+          deleteIcon={<DeleteIcon />}
+          onDelete={this.deleteAudioLists}
+          removeId={removeId}
+          audioListsDragEnd={this.audioListsDragEnd}
+          sliderBaseOptions={sliderBaseOptions}
+        />
+
+        {/* lyrics */}
+        {LyricComponentDraggable}
+
+        <audio
+          className="music-player-audio"
+          {...preloadState}
+          src={musicSrc}
+          ref={node => (this.audio = node)} // eslint-disable-line no-return-assign
+        />
+      </div>,
+      container
+    );
   }
 }
 
 ReactAmaiMusicPlayer.propTypes = {
-  audioLists: PropTypes.instanceOf(Array).isRequired,
+  audioLists: PropTypes.instanceOf(Array),
   theme: PropTypes.oneOf(['dark', 'light']),
   mode: PropTypes.oneOf(['mini', 'full']),
   defaultPlayMode: PropTypes.oneOf(['order', 'orderLoop', 'singleLoop', 'shufflePlay']),
@@ -1699,6 +1569,7 @@ ReactAmaiMusicPlayer.propTypes = {
     right: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
     bottom: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   }),
+  playModeTipVisible: PropTypes.bool,
   onAudioPlay: PropTypes.func,
   onAudioPause: PropTypes.func,
   onAudioEnded: PropTypes.func,

@@ -23,18 +23,21 @@
 		],
 		"indent": ["error", 2, {"SwitchCase": 1}],
 		"jsx-a11y/click-events-have-key-events": "off",
+		"jsx-a11y/media-has-caption": "off",
 		"react/jsx-props-no-spreading": "off",
 		"no-bitwise": "off",
 		"no-loops/no-loops": 2,
 		"no-nested-ternary": "off",
 		"no-plusplus": "off",
 		"no-underscore-dangle": "off",
+		"no-unused-expressions": ["error", { "allowShortCircuit": true }],
 		"no-use-extend-native/no-use-extend-native": 2,
 		"optimize-regex/optimize-regex": "warn",
 		"radix": "off",
+		"react/destructuring-assignment": "off",
 		"react/jsx-filename-extension": "off",
 		"react/require-default-props": "off",
-		"sonarjs/cognitive-complexity": ["error", 30]
+		"sonarjs/cognitive-complexity": ["error", 30],
 	},
 	"settings": {
 		"import/resolver": {
