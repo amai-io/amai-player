@@ -1,0 +1,28 @@
+image: node
+
+stages:
+  - test
+  - publish
+
+cache:
+  paths:
+    - node_modules/
+
+before_script:
+  - npm install
+
+test:
+  stage: test
+  allow_failure: true
+  script:
+    - npm run lint
+    - npm test
+
+publish:
+  stage: publish
+  only:
+    - tags
+  script:
+    - echo "//registry.npmjs.org/:_authToken=$NPM_AUTH_TOKEN" > ~/.npmrc
+    - export PACKAGE_VERSION=$(node -p -e "require('./package.json').version")
+    - npm publish --access public --tag $PACKAGE_VERSION

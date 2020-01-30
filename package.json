@@ -1,5 +1,5 @@
 {
-  "name": "react-amai-music-player",
+  "name": "@amai-io/react-amai-music-player",
   "version": "1.1.1",
   "description": "Maybe the best beautiful HTML5 responsive player component for react",
   "main": "lib/index.js",
