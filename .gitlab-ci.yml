@@ -18,6 +18,16 @@ test:
     - npm run lint
     - npm test
 
+manual publish:
+  stage: publish
+  when: manual
+  except:
+    - tags
+  script:
+    - echo "//registry.npmjs.org/:_authToken=$NPM_AUTH_TOKEN" > ~/.npmrc
+    - export PACKAGE_VERSION=$(node -p -e "require('./package.json').version")
+    - npm publish --access public --tag $PACKAGE_VERSION
+
 publish:
   stage: publish
   only:
