@@ -19,22 +19,8 @@ test:
     - npm run lint
     - npm test
 
-manual publish:
-  stage: publish
-  when: manual
-  except:
-    - tags
-  script:
-    - yarn install
-    - echo "//registry.npmjs.org/:_authToken=$NPM_AUTH_TOKEN" > ~/.npmrc
-    - npm config set scope amai-io --global
-    - export PACKAGE_VERSION=$(node -p -e "require('./package.json').version")
-    - yarn publish
-
 publish:
   stage: publish
-  only:
-    - tags
   script:
     - yarn install
     - echo "//registry.npmjs.org/:_authToken=$NPM_AUTH_TOKEN" > ~/.npmrc
