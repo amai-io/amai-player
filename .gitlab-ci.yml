@@ -27,6 +27,7 @@ manual publish:
   script:
     - yarn install
     - echo "//registry.npmjs.org/:_authToken=$NPM_AUTH_TOKEN" > ~/.npmrc
+    - npm config set scope amai-io --global
     - export PACKAGE_VERSION=$(node -p -e "require('./package.json').version")
     - yarn publish
 
@@ -37,5 +38,6 @@ publish:
   script:
     - yarn install
     - echo "//registry.npmjs.org/:_authToken=$NPM_AUTH_TOKEN" > ~/.npmrc
+    - npm config set scope amai-io --global
     - export PACKAGE_VERSION=$(node -p -e "require('./package.json').version")
     - yarn publish
