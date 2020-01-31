@@ -25,9 +25,10 @@ manual publish:
   except:
     - tags
   script:
+    - yarn install
     - echo "//registry.npmjs.org/:_authToken=$NPM_AUTH_TOKEN" > ~/.npmrc
     - export PACKAGE_VERSION=$(node -p -e "require('./package.json').version")
-    - npm publish --access public --tag $PACKAGE_VERSION
+    - yarn publish
 
 publish:
   stage: publish
